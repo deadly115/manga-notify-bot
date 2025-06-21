@@ -1,4 +1,3 @@
-# adapters/walker.py
 from urllib.parse import urljoin, urlparse
 import aiohttp
 from bs4 import BeautifulSoup
@@ -6,9 +5,6 @@ from bs4 import BeautifulSoup
 HEADERS = {"User-Agent": "MangaNotifyBot/1.2"}
 
 def normalize_series_url(url: str) -> str:
-    """
-    Strip any /episodes/... and return series root URL
-    """
     parsed = urlparse(url)
     parts = parsed.path.strip("/").split("/")
     if "episodes" in parts:
@@ -16,9 +12,6 @@ def normalize_series_url(url: str) -> str:
     return url
 
 async def latest_walker(url: str):
-    """
-    Return (chapter_id, title, full_link) for comic-walker.com
-    """
     url = normalize_series_url(url)
 
     async with aiohttp.ClientSession() as sess:
@@ -28,9 +21,10 @@ async def latest_walker(url: str):
 
     soup = BeautifulSoup(html, "lxml")
 
-    item = soup.select_one("li.episodeList__item a")
+    # Updated selector (2025)
+    item = soup.select_one("a.episodeList__link")
     if not item:
-        raise ValueError("No episode link found – structure may have changed.")
+        raise ValueError("No episode link found – Comic Walker page layout may have changed.")
 
     rel = item["href"]
     full = urljoin(base_url, rel)
