@@ -1,5 +1,6 @@
 # bot.py — Track manga, manage ping lists, show latest chapter across 4 sites
-# Works on discord.py 2.5.x + aiohttp + aiosqlite + python-dotenv + bs4 + lxml
+# Works on discord.py 2.5.x + aiohttp + aiosqlite + python-dotenv + beautifulsoup4 + lxml
+# models.sql as before: subscriptions(url,channel_id,last_id,ping_ids,owner_id)
 
 import os
 import asyncio
@@ -14,14 +15,14 @@ import aiohttp, aiosqlite
 from bs4 import BeautifulSoup
 
 # ─────── Load DISCORD_TOKEN ────────────────────────────────────────────
-# 1) Try real environment (e.g. Railway, VPS)
+# 1) Read from the real environment (Railway, VPS, etc.)
 TOKEN = os.getenv("DISCORD_TOKEN")
-# 2) Fallback to .env file for local development
+# 2) If not set, fall back to loading a .env file (for local dev)
 if not TOKEN:
     from dotenv import load_dotenv
-    load_dotenv()  # loads variables from a .env file if present
+    load_dotenv()
     TOKEN = os.getenv("DISCORD_TOKEN")
-# 3) Abort if still missing
+# 3) If still missing, abort
 if not TOKEN:
     raise SystemExit("❌ Please set DISCORD_TOKEN as an environment variable")
 
@@ -32,7 +33,7 @@ bot = commands.Bot(command_prefix="/", intents=discord.Intents.default())
 DB_FILE = "data.db"
 SQL     = Path("models.sql").read_text()
 
-# Import the dispatcher that picks the right adapter
+# Import the dispatcher that picks the right adapter based on URL
 from adapters import get_latest
 
 # ─────── Database Helpers ─────────────────────────────────────────────
@@ -121,8 +122,10 @@ async def track(inter: discord.Interaction, url: str, channel: discord.TextChann
     except Exception as e:
         return await inter.response.send_message(f"❌ `{e}`", ephemeral=True)
 
+    # Save new subscription with no pings yet
     await db_upsert(url, channel.id, chap_id, [], inter.user.id)
 
+    # Prompt the user to choose members/roles to ping
     await inter.response.send_message(
         "Pick who to mention on new chapters:",
         view=PingSelectView(url, channel.id, inter.user.id),
