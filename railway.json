@@ -1,0 +1,5 @@
+{
+    "build": [
+        "echo DISCORD_TOKEN=$DISCORD_TOKEN > .env"
+    ]
+}
