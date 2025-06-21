@@ -1,5 +1,10 @@
 {
-    "build": [
-        "echo DISCORD_TOKEN=$DISCORD_TOKEN > .env"
-    ]
+    "$schema": "https://railway.app/railway.schema.json",
+    "build": {
+        "builder": "NIXPACKS",
+        "buildCommand": "echo DISCORD_TOKEN=$DISCORD_TOKEN > .env"
+    },
+    "deploy": {
+        "startCommand": "python bot.py"
+    }
 }
