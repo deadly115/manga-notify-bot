@@ -1,6 +1,5 @@
 # bot.py — Track manga, manage ping lists, show latest chapter across 4 sites
 # Works on discord.py 2.5.x + aiohttp + aiosqlite + python-dotenv + bs4 + lxml
-# models.sql as before: subscriptions(url,channel_id,last_id,ping_ids,owner_id)
 
 import os
 import asyncio
@@ -13,24 +12,30 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp, aiosqlite
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 
-# Import the dispatcher that picks the right adapter
-from adapters import get_latest
-
-# ─────────── Basic setup ───────────────────────────────────────────────
-load_dotenv()
+# ─────── Load DISCORD_TOKEN ────────────────────────────────────────────
+# 1) Try real environment (e.g. Railway, VPS)
 TOKEN = os.getenv("DISCORD_TOKEN")
+# 2) Fallback to .env file for local development
 if not TOKEN:
-    raise SystemExit("❌ Put DISCORD_TOKEN=… in a .env file")
+    from dotenv import load_dotenv
+    load_dotenv()  # loads variables from a .env file if present
+    TOKEN = os.getenv("DISCORD_TOKEN")
+# 3) Abort if still missing
+if not TOKEN:
+    raise SystemExit("❌ Please set DISCORD_TOKEN as an environment variable")
 
+# ─────── Logging & Bot Setup ───────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 bot = commands.Bot(command_prefix="/", intents=discord.Intents.default())
 
 DB_FILE = "data.db"
-SQL      = Path("models.sql").read_text()
+SQL     = Path("models.sql").read_text()
 
-# ───────── Database helpers ────────────────────────────────────────────
+# Import the dispatcher that picks the right adapter
+from adapters import get_latest
+
+# ─────── Database Helpers ─────────────────────────────────────────────
 async def db_init():
     async with aiosqlite.connect(DB_FILE) as db:
         await db.executescript(SQL)
@@ -76,7 +81,7 @@ async def db_urls_for_channel(channel_id: int) -> List[str]:
         await cur.close()
         return [r[0] for r in rows]
 
-# ───────── Mentionable-select view ─────────────────────────────────────
+# ─────── Mentionable-select View ──────────────────────────────────────
 class PingSelectView(discord.ui.View):
     """Ephemeral view to pick users/roles to ping."""
 
@@ -104,32 +109,30 @@ class PingSelectView(discord.ui.View):
             view=None
         )
 
-# ───────── /track ───────────────────────────────────────────────────────
+# ─────── /track Command ───────────────────────────────────────────────
 @bot.tree.command(description="Track a series and pick who to ping")
 @app_commands.describe(
     url="Series URL (Corona-ex, Walker, Gardo, or Manga-Up)",
     channel="Channel where updates will be posted"
 )
 async def track(inter: discord.Interaction, url: str, channel: discord.TextChannel):
-    # Fetch the current latest chapter from the right site
     try:
         chap_id, *_ = await get_latest(url)
     except Exception as e:
         return await inter.response.send_message(f"❌ `{e}`", ephemeral=True)
 
-    # Save row with empty ping list
     await db_upsert(url, channel.id, chap_id, [], inter.user.id)
 
-    # Prompt the user to choose members/roles
     await inter.response.send_message(
         "Pick who to mention on new chapters:",
         view=PingSelectView(url, channel.id, inter.user.id),
         ephemeral=True
     )
 
-# ───────── /updatemembers ───────────────────────────────────────────────
+# ─────── /updatemembers Command ───────────────────────────────────────
 @bot.tree.command(description="Edit ping list for a tracked channel")
-async def updatemembers(inter: discord.Interaction, channel: discord.TextChannel):
+async def updatemembers(inter: discord.Interaction,
+                        channel: discord.TextChannel):
     urls = await db_urls_for_channel(channel.id)
     if not urls:
         return await inter.response.send_message(
@@ -141,7 +144,8 @@ async def updatemembers(inter: discord.Interaction, channel: discord.TextChannel
         preset = [int(x) for x in row[1].split(",")] if row and row[1] else []
         await inter.response.send_message(
             f"Edit mentions for {series_url}:",
-            view=PingSelectView(series_url, channel.id, inter.user.id, preset),
+            view=PingSelectView(series_url, channel.id,
+                                inter.user.id, preset),
             ephemeral=True
         )
 
@@ -155,10 +159,13 @@ async def updatemembers(inter: discord.Interaction, channel: discord.TextChannel
     async def choose(i2: discord.Interaction):
         await send_picker(sel.values[0])
     sel.callback = choose
-    view = discord.ui.View(timeout=60); view.add_item(sel)
-    await inter.response.send_message("Choose series to edit:", view=view, ephemeral=True)
+    view = discord.ui.View(timeout=60)
+    view.add_item(sel)
+    await inter.response.send_message(
+        "Choose series to edit:", view=view, ephemeral=True
+    )
 
-# ───────── /latest ─────────────────────────────────────────────────────
+# ─────── /latest Command ──────────────────────────────────────────────
 @bot.tree.command(description="Show the latest chapter tracked in a channel")
 async def latest(inter: discord.Interaction, channel: discord.TextChannel):
     urls = await db_urls_for_channel(channel.id)
@@ -182,7 +189,7 @@ async def latest(inter: discord.Interaction, channel: discord.TextChannel):
     )
     await inter.followup.send(embed=embed, ephemeral=True)
 
-# ───────── Background poller ───────────────────────────────────────────
+# ─────── Background Poller ────────────────────────────────────────────
 @tasks.loop(minutes=15)
 async def poll():
     rows = await db_rows()
@@ -203,7 +210,7 @@ async def poll():
                 logging.warning("Missing perms in #%s", ch_id)
         await db_upsert(url, ch_id, new_id, ping_csv.split(","), owner_id=0)
 
-# ───────── Run ─────────────────────────────────────────────────────────
+# ─────── Run the Bot ───────────────────────────────────────────────────
 @bot.event
 async def on_ready():
     await bot.tree.sync()
